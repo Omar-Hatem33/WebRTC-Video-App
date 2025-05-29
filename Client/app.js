@@ -335,29 +335,29 @@ function updateStatus(message, status) {
     document.body.appendChild(infoDiv)
   }
 
-  const diagDiv = document.getElementById("diagnostic-info")
-  if (diagDiv) {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const wsUrl = `${protocol}//${window.location.hostname}:${BACKEND_PORT}/ws`
+  // const diagDiv = document.getElementById("diagnostic-info")
+  // if (diagDiv) {
+  //   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+  //   const wsUrl = `${protocol}//${window.location.hostname}:${BACKEND_PORT}/ws`
 
-    diagDiv.innerHTML = `
-      <div style="margin-bottom: 10px; font-weight: bold; color: #4CAF50;">🔍 Connection Diagnostics</div>
-      <strong>Status:</strong> <span style="color: ${status === "connected" ? "#4CAF50" : status === "connecting" ? "#FF9800" : "#F44336"}">${status}</span><br>
-      <strong>Message:</strong> ${message}<br>
-      <strong>Frontend URL:</strong> ${window.location.href}<br>
-      <strong>Backend URL:</strong> http://${window.location.hostname}:${BACKEND_PORT}<br>
-      <strong>WebSocket URL:</strong> ${wsUrl}<br>
-      <strong>Client ID:</strong> ${clientId || "Not assigned"}<br>
-      <strong>Peers:</strong> ${peers.size}<br>
-      <strong>Reconnect Attempts:</strong> ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}<br>
-      <strong>Socket State:</strong> ${socket ? ["CONNECTING", "OPEN", "CLOSING", "CLOSED"][socket.readyState] : "No socket"}<br>
-      <div style="margin-top: 10px;">
-        <button onclick="window.connectToSignalingServer()" style="margin-right: 5px; padding: 5px 10px; background: #2196F3; color: white; border: none; border-radius: 3px; cursor: pointer;">Reconnect</button>
-        <button onclick="window.refreshPeerList()" style="margin-right: 5px; padding: 5px 10px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer;">Refresh Peers</button>
-        <button onclick="window.testConnection()" style="padding: 5px 10px; background: #FF9800; color: white; border: none; border-radius: 3px; cursor: pointer;">Test Connection</button>
-      </div>
-    `
-  }
+  //   diagDiv.innerHTML = `
+  //     <div style="margin-bottom: 10px; font-weight: bold; color: #4CAF50;">🔍 Connection Diagnostics</div>
+  //     <strong>Status:</strong> <span style="color: ${status === "connected" ? "#4CAF50" : status === "connecting" ? "#FF9800" : "#F44336"}">${status}</span><br>
+  //     <strong>Message:</strong> ${message}<br>
+  //     <strong>Frontend URL:</strong> ${window.location.href}<br>
+  //     <strong>Backend URL:</strong> http://${window.location.hostname}:${BACKEND_PORT}<br>
+  //     <strong>WebSocket URL:</strong> ${wsUrl}<br>
+  //     <strong>Client ID:</strong> ${clientId || "Not assigned"}<br>
+  //     <strong>Peers:</strong> ${peers.size}<br>
+  //     <strong>Reconnect Attempts:</strong> ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}<br>
+  //     <strong>Socket State:</strong> ${socket ? ["CONNECTING", "OPEN", "CLOSING", "CLOSED"][socket.readyState] : "No socket"}<br>
+  //     <div style="margin-top: 10px;">
+  //       <button onclick="window.connectToSignalingServer()" style="margin-right: 5px; padding: 5px 10px; background: #2196F3; color: white; border: none; border-radius: 3px; cursor: pointer;">Reconnect</button>
+  //       <button onclick="window.refreshPeerList()" style="margin-right: 5px; padding: 5px 10px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer;">Refresh Peers</button>
+  //       <button onclick="window.testConnection()" style="padding: 5px 10px; background: #FF9800; color: white; border: none; border-radius: 3px; cursor: pointer;">Test Connection</button>
+  //     </div>
+  //   `
+  // }
 }
 
 // Test connection function
