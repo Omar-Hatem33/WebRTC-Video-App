@@ -1,0 +1,5 @@
+# Ignore node modules
+# and other common files in a Node.js project
+package.json
+package-lock.json
+node_modules/
