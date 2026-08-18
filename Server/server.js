@@ -5,6 +5,29 @@ const fs = require("fs")
 const path = require("path")
 const os = require("os")
 
+const CERT_PATH = path.join(__dirname, "certs", "cert.pem")
+const KEY_PATH = path.join(__dirname, "certs", "key.pem")
+const HTTPS_PORT = Number(process.env.PORT || 8080)
+const HTTP_REDIRECT_PORT = Number(process.env.HTTP_PORT || 80)
+
+function ensureCertificateFiles() {
+  if (!fs.existsSync(CERT_PATH) || !fs.existsSync(KEY_PATH)) {
+    console.error("❌ Missing self-signed certificate files in Server/certs/")
+    console.error(`   Expected: ${CERT_PATH}`)
+    console.error(`   Expected: ${KEY_PATH}`)
+    console.error("   Generate them with:")
+    console.error("   openssl req -x509 -newkey rsa:2048 -nodes -keyout Server/certs/key.pem -out Server/certs/cert.pem -days 365 -subj \"/CN=localhost\"")
+    process.exit(1)
+  }
+}
+
+ensureCertificateFiles()
+
+const httpsOptions = {
+  key: fs.readFileSync(KEY_PATH),
+  cert: fs.readFileSync(CERT_PATH),
+}
+
 // Get network interfaces to display available IP addresses
 function getNetworkInterfaces() {
   const networkInterfacesList = os.networkInterfaces()
@@ -333,13 +356,13 @@ function createTestPage() {
   `
 }
 
-// Create HTTP server with static file serving
-const server = http.createServer((req, res) => {
+// Create HTTPS server with static file serving
+const httpsServer = https.createServer(httpsOptions, (req, res) => {
   const clientIp = req.socket.remoteAddress
   const userAgent = req.headers["user-agent"] || "Unknown"
   const timestamp = new Date().toISOString()
 
-  console.log(`[${timestamp}] HTTP "${req.method} ${req.url}" from ${clientIp}`)
+  console.log(`[${timestamp}] HTTPS "${req.method} ${req.url}" from ${clientIp}`)
   console.log(`[${timestamp}] User-Agent: ${userAgent}`)
 
   // Add CORS headers for cross-origin requests
@@ -359,8 +382,9 @@ const server = http.createServer((req, res) => {
     filePath = "/index.html"
   }
 
-  // Construct the full file path
-  const fullPath = path.join(__dirname, "../Client", filePath)
+  // Strip query strings before resolving files
+  const safeUrl = filePath.split("?")[0]
+  const fullPath = path.join(__dirname, "../Client", safeUrl)
   console.log(`[${timestamp}] Attempting to serve file: ${fullPath}`)
 
   // Check if file exists first
@@ -369,7 +393,7 @@ const server = http.createServer((req, res) => {
       console.log(`[${timestamp}] File does not exist: ${fullPath}`)
 
       // If index.html doesn't exist, serve the test page
-      if (filePath === "/index.html") {
+      if (safeUrl === "/index.html") {
         console.log(`[${timestamp}] Serving built-in test page`)
         res.writeHead(200, { "Content-Type": "text/html" })
         res.end(createTestPage(), "utf-8")
@@ -384,7 +408,7 @@ const server = http.createServer((req, res) => {
           <head><title>404 Not Found</title></head>
           <body>
             <h1>404 - File Not Found</h1>
-            <p>The requested file was not found: ${filePath}</p>
+            <p>The requested file was not found: ${safeUrl}</p>
             <p>Server path: ${fullPath}</p>
             <p>Server directory: ${__dirname}</p>
             <p>Client directory: ${path.join(__dirname, "../Client")}</p>
@@ -408,7 +432,7 @@ const server = http.createServer((req, res) => {
         res.writeHead(500)
         res.end(`Server Error: ${error.code}`)
       } else {
-        console.log(`[${timestamp}] Successfully served: ${filePath} (${content.length} bytes, ${mimeType})`)
+        console.log(`[${timestamp}] Successfully served: ${safeUrl} (${content.length} bytes, ${mimeType})`)
         res.writeHead(200, { "Content-Type": mimeType })
         res.end(content, "utf-8")
       }
@@ -416,9 +440,20 @@ const server = http.createServer((req, res) => {
   })
 })
 
-// Create WebSocket server attached to HTTP server
+// Redirect HTTP requests to HTTPS to ensure secure media access
+const redirectServer = http.createServer((req, res) => {
+  const host = req.headers.host || `localhost:${HTTPS_PORT}`
+  const redirectHost = host.replace(/:\d+$/, "")
+  const targetUrl = `https://${redirectHost}:${HTTPS_PORT}${req.url}`
+
+  console.log(`[${new Date().toISOString()}] Redirecting HTTP request to ${targetUrl}`)
+  res.writeHead(301, { Location: targetUrl })
+  res.end()
+})
+
+// Create WebSocket server attached to HTTPS server
 const wss = new WebSocket.Server({
-  server: server,
+  server: httpsServer,
   path: "/ws",
 })
 
@@ -609,23 +644,22 @@ function sendToClient(clientId, message) {
 // Define clientDir
 const clientDir = path.join(__dirname, "../Client")
 
-// Start the server
-const PORT = process.env.PORT || 8080
-server.listen(PORT, "0.0.0.0", () => {
+// Start the secure and redirect servers
+httpsServer.listen(HTTPS_PORT, "0.0.0.0", () => {
   console.log(`\n🚀 WebRTC Signaling Server Started!`)
-  console.log(`📡 Server running on port ${PORT}`)
-  console.log(`🔗 Server bound to: 0.0.0.0:${PORT} (all interfaces)`)
+  console.log(`📡 Secure app running on https://localhost:${HTTPS_PORT}`)
+  console.log(`🔗 Server bound to: 0.0.0.0:${HTTPS_PORT} (all interfaces)`)
 
   console.log(`\n📱 Access the application from any device on your network:`)
 
   // Display localhost
-  console.log(`   • Local: http://localhost:${PORT}`)
+  console.log(`   • Local: https://localhost:${HTTPS_PORT}`)
 
   // Display network interfaces
   const networkInterfaces = getNetworkInterfaces()
   if (networkInterfaces.length > 0) {
     networkInterfaces.forEach((iface) => {
-      console.log(`   • Network (${iface.name}): http://${iface.address}:${PORT}`)
+      console.log(`   • Network (${iface.name}): https://${iface.address}:${HTTPS_PORT}`)
     })
   } else {
     console.log(`   • Network: No external network interfaces found`)
@@ -634,28 +668,37 @@ server.listen(PORT, "0.0.0.0", () => {
 
   console.log(`\n💡 To connect from other devices:`)
   console.log(`   1. Make sure all devices are on the same network`)
-  console.log(`   2. Use one of the network URLs above`)
-  console.log(`   3. The test page will auto-connect and show connection status`)
+  console.log(`   2. Open the secure URL above and accept the self-signed certificate warning`)
+  console.log(`   3. Grant camera and microphone access when prompted`)
 
   console.log(`\n🔧 Technical Details:`)
   console.log(`   • Server files served from: ${clientDir}`)
-  console.log(`   • WebSocket endpoint: ws://[server-ip]:${PORT}/ws`)
-  console.log(`   • Built-in test page available if no index.html found`)
+  console.log(`   • WebSocket endpoint: wss://[server-ip]:${HTTPS_PORT}/ws`)
+  console.log(`   • Certificate files: ${CERT_PATH} and ${KEY_PATH}`)
+  console.log(`   • HTTP redirect enabled on port ${HTTP_REDIRECT_PORT}`)
   console.log(`   • CORS enabled for all origins`)
 
   console.log(`\n✅ Ready for connections!`)
   console.log("=".repeat(60) + "\n")
 })
 
+redirectServer.listen(HTTP_REDIRECT_PORT, "0.0.0.0", () => {
+  console.log(`➡️  HTTP redirect server listening on http://localhost:${HTTP_REDIRECT_PORT}`)
+})
+
 // Enhanced error handling
-server.on("error", (error) => {
-  console.error(`❌ Server error:`, error)
+httpsServer.on("error", (error) => {
+  console.error(`❌ HTTPS server error:`, error)
   if (error.code === "EADDRINUSE") {
-    console.error(`❌ Port ${PORT} is already in use. Please:`)
-    console.error(`   1. Stop any other servers running on port ${PORT}`)
+    console.error(`❌ Port ${HTTPS_PORT} is already in use. Please:`)
+    console.error(`   1. Stop any other servers running on port ${HTTPS_PORT}`)
     console.error(`   2. Or set a different PORT environment variable`)
-    console.error(`   3. Or kill the process using: lsof -ti:${PORT} | xargs kill`)
+    console.error(`   3. Or kill the process using: lsof -ti:${HTTPS_PORT} | xargs kill`)
   }
+})
+
+redirectServer.on("error", (error) => {
+  console.error(`❌ HTTP redirect server error:`, error)
 })
 
 // Graceful shutdown
@@ -663,15 +706,17 @@ process.on("SIGINT", () => {
   console.log("\n🛑 Shutting down server...")
   clearInterval(interval)
   wss.close(() => {
-    server.close(() => {
-      console.log("✅ Server closed gracefully")
-      process.exit(0)
+    httpsServer.close(() => {
+      redirectServer.close(() => {
+        console.log("✅ Server closed gracefully")
+        process.exit(0)
+      })
     })
   })
 })
 
 // Log all network activity
-server.on("connection", (socket) => {
+httpsServer.on("connection", (socket) => {
   const timestamp = new Date().toISOString()
   console.log(`[${timestamp}] 🔌 New TCP connection from ${socket.remoteAddress}:${socket.remotePort}`)
 

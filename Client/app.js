@@ -14,6 +14,9 @@ let socket
 let clientId
 let remoteClientId
 const peers = new Map()
+const pendingCandidates = []
+let isMakingOffer = false
+let shouldInitiateOffer = false
 
 // Make these available to the UI enhancement script
 window.clientId = clientId
@@ -315,101 +318,7 @@ function updateStatus(message, status) {
       statusSidebar.className.replace(/connected|disconnected|connecting/g, "") + " status " + status
   }
 
-  // Add diagnostic info to the page
-  const diagnosticInfo = document.getElementById("diagnostic-info")
-  if (!diagnosticInfo) {
-    const infoDiv = document.createElement("div")
-    infoDiv.id = "diagnostic-info"
-    infoDiv.style.position = "fixed"
-    infoDiv.style.bottom = "10px"
-    infoDiv.style.right = "10px"
-    infoDiv.style.background = "rgba(0,0,0,0.8)"
-    infoDiv.style.color = "white"
-    infoDiv.style.padding = "15px"
-    infoDiv.style.borderRadius = "8px"
-    infoDiv.style.fontSize = "11px"
-    infoDiv.style.maxWidth = "350px"
-    infoDiv.style.zIndex = "1000"
-    infoDiv.style.fontFamily = "monospace"
-    infoDiv.style.lineHeight = "1.4"
-    document.body.appendChild(infoDiv)
-  }
-
-  const diagDiv = document.getElementById("diagnostic-info")
-  if (diagDiv) {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const wsUrl = `${protocol}//${window.location.hostname}:${BACKEND_PORT}/ws`
-
-    diagDiv.innerHTML = `
-      <div style="margin-bottom: 10px; font-weight: bold; color: #4CAF50;">🔍 Connection Diagnostics</div>
-      <strong>Status:</strong> <span style="color: ${status === "connected" ? "#4CAF50" : status === "connecting" ? "#FF9800" : "#F44336"}">${status}</span><br>
-      <strong>Message:</strong> ${message}<br>
-      <strong>Frontend URL:</strong> ${window.location.href}<br>
-      <strong>Backend URL:</strong> http://${window.location.hostname}:${BACKEND_PORT}<br>
-      <strong>WebSocket URL:</strong> ${wsUrl}<br>
-      <strong>Client ID:</strong> ${clientId || "Not assigned"}<br>
-      <strong>Peers:</strong> ${peers.size}<br>
-      <strong>Reconnect Attempts:</strong> ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}<br>
-      <strong>Socket State:</strong> ${socket ? ["CONNECTING", "OPEN", "CLOSING", "CLOSED"][socket.readyState] : "No socket"}<br>
-      <div style="margin-top: 10px;">
-        <button onclick="window.connectToSignalingServer()" style="margin-right: 5px; padding: 5px 10px; background: #2196F3; color: white; border: none; border-radius: 3px; cursor: pointer;">Reconnect</button>
-        <button onclick="window.refreshPeerList()" style="margin-right: 5px; padding: 5px 10px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer;">Refresh Peers</button>
-        <button onclick="window.testConnection()" style="padding: 5px 10px; background: #FF9800; color: white; border: none; border-radius: 3px; cursor: pointer;">Test Connection</button>
-      </div>
-    `
-  }
 }
-
-// Test connection function
-function testConnection() {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-  const wsUrl = `${protocol}//${window.location.hostname}:${BACKEND_PORT}/ws`
-
-  log("🧪 Testing connection...")
-
-  // Test if we can reach the HTTP server first
-  const httpUrl = `http://${window.location.hostname}:${BACKEND_PORT}/`
-
-  fetch(httpUrl)
-    .then((response) => {
-      log(`✅ HTTP server reachable: ${response.status} ${response.statusText}`)
-      return response.text()
-    })
-    .then((html) => {
-      log(`✅ HTTP response received (${html.length} bytes)`)
-
-      // Now test WebSocket
-      const testSocket = new WebSocket(wsUrl)
-
-      const testTimeout = setTimeout(() => {
-        log("❌ Test WebSocket connection timeout", "error")
-        testSocket.close()
-      }, 5000)
-
-      testSocket.onopen = () => {
-        clearTimeout(testTimeout)
-        log("✅ Test WebSocket connection successful")
-        testSocket.close()
-      }
-
-      testSocket.onerror = (error) => {
-        clearTimeout(testTimeout)
-        log(`❌ Test WebSocket connection failed: ${error}`, "error")
-      }
-
-      testSocket.onclose = (event) => {
-        clearTimeout(testTimeout)
-        log(`Test WebSocket closed: ${event.code} ${event.reason}`)
-      }
-    })
-    .catch((error) => {
-      log(`❌ HTTP server not reachable: ${error}`, "error")
-      log(`❌ This suggests the backend server is not running or not accessible from this device`, "error")
-    })
-}
-
-// Make test function available globally
-window.testConnection = testConnection
 
 // Update peer list
 function updatePeerList(peerIds) {
@@ -563,20 +472,8 @@ async function startCall() {
 
     // Only create offer if we initiated the call
     if (remoteClientId) {
-      // Create and send offer
-      const offer = await peerConnection.createOffer()
-      await peerConnection.setLocalDescription(offer)
-
-      socket.send(
-        JSON.stringify({
-          type: "offer",
-          from: clientId,
-          to: remoteClientId,
-          offer: peerConnection.localDescription,
-        }),
-      )
-
-      updateStatus(`Calling peer ${remoteClientId.substring(remoteClientId.length - 4)}...`, "connecting")
+      shouldInitiateOffer = true
+      await maybeCreateAndSendOffer("startCall")
     } else {
       updateStatus("Waiting for incoming call...", "connected")
     }
@@ -589,11 +486,11 @@ async function startCall() {
 
     // Show helpful error message for common issues
     if (error.name === "NotAllowedError") {
-      alert("Camera/microphone access denied. Please allow permissions and try again.")
+      log("Camera/microphone access denied. Please allow permissions and try again.", "warn")
     } else if (error.name === "NotFoundError") {
-      alert("No camera or microphone found. Please check your devices and try again.")
+      log("No camera or microphone found. Please check your devices and try again.", "warn")
     } else if (error.name === "NotReadableError") {
-      alert("Camera/microphone is already in use by another application.")
+      log("Camera/microphone is already in use by another application.", "warn")
     }
 
     endCall()
@@ -640,8 +537,9 @@ function createPeerConnection() {
       updateStatus(`ICE connection ${peerConnection.iceConnectionState}`, "disconnected")
       if (peerConnection.iceConnectionState === "failed") {
         log("❌ ICE connection failed - likely a NAT traversal issue", "error")
-        alert(
+        log(
           "Call connection failed. This might be due to network restrictions. Make sure both devices are on the same network, or try using a different network.",
+          "warn",
         )
       }
       if (peerConnection.iceConnectionState !== "closed") {
@@ -688,30 +586,72 @@ function createPeerConnection() {
   // Negotiation needed handler
   peerConnection.onnegotiationneeded = async () => {
     log("🤝 Negotiation needed event fired")
-    if (remoteClientId) {
-      try {
-        log("📤 Creating offer due to negotiation needed event")
-        const offer = await peerConnection.createOffer()
-        await peerConnection.setLocalDescription(offer)
-        log(`📤 Sending offer to ${remoteClientId}`)
-        socket.send(
-          JSON.stringify({
-            type: "offer",
-            from: clientId,
-            to: remoteClientId,
-            offer: peerConnection.localDescription,
-          }),
-        )
-      } catch (error) {
-        log(`❌ Error during negotiation: ${error}`, "error")
-      }
+    await maybeCreateAndSendOffer("onnegotiationneeded")
+  }
+}
+
+async function maybeCreateAndSendOffer(source = "manual") {
+  if (!peerConnection || !remoteClientId || !shouldInitiateOffer) {
+    return
+  }
+
+  if (isMakingOffer) {
+    log(`⏳ Skipping offer from ${source}: already making an offer`, "warn")
+    return
+  }
+
+  if (peerConnection.signalingState !== "stable") {
+    log(
+      `⏳ Skipping offer from ${source}: signaling state is ${peerConnection.signalingState}, waiting for stable`,
+      "warn",
+    )
+    return
+  }
+
+  try {
+    isMakingOffer = true
+    log(`📤 Creating offer (${source}) for peer ${remoteClientId}`)
+    const offer = await peerConnection.createOffer()
+    await peerConnection.setLocalDescription(offer)
+
+    if (socket && socket.readyState === WebSocket.OPEN && peerConnection.localDescription) {
+      socket.send(
+        JSON.stringify({
+          type: "offer",
+          from: clientId,
+          to: remoteClientId,
+          offer: peerConnection.localDescription,
+        }),
+      )
+      updateStatus(`Calling peer ${remoteClientId.substring(remoteClientId.length - 4)}...`, "connecting")
     }
+  } catch (error) {
+    log(`❌ Error creating/sending offer: ${error}`, "error")
+  } finally {
+    isMakingOffer = false
+  }
+}
+
+function flushPendingCandidates() {
+  if (!peerConnection || !peerConnection.remoteDescription) {
+    return
+  }
+
+  while (pendingCandidates.length > 0) {
+    const candidate = pendingCandidates.shift()
+    peerConnection
+      .addIceCandidate(new RTCIceCandidate(candidate))
+      .catch((error) => log(`❌ Error adding queued ICE candidate: ${error}`, "error"))
   }
 }
 
 // Handle incoming offer
 async function handleOffer(data) {
   try {
+    shouldInitiateOffer = false
+    isMakingOffer = false
+    pendingCandidates.length = 0
+
     if (peerConnection) {
       // If we already have a connection, close it and create a new one
       peerConnection.close()
@@ -742,6 +682,7 @@ async function handleOffer(data) {
 
     // Set remote description (the offer)
     await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer))
+    flushPendingCandidates()
 
     // Create and set local description (the answer)
     const answer = await peerConnection.createAnswer()
@@ -787,6 +728,7 @@ async function handleAnswer(data) {
     }
 
     await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer))
+    flushPendingCandidates()
     updateStatus("Call established", "connected")
 
     // Update peer item status if it exists
@@ -810,8 +752,13 @@ async function handleAnswer(data) {
 async function handleCandidate(data) {
   try {
     if (peerConnection && data.candidate) {
-      log(`📥 Adding ICE candidate from ${data.from}`)
-      await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate))
+      if (peerConnection.remoteDescription) {
+        log(`📥 Adding ICE candidate from ${data.from}`)
+        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate))
+      } else {
+        log(`🧊 Queueing ICE candidate from ${data.from} until remote description is set`)
+        pendingCandidates.push(data.candidate)
+      }
     }
   } catch (error) {
     log(`❌ Error adding ICE candidate: ${error}`, "error")
@@ -861,6 +808,9 @@ function endCall() {
 
   remoteVideo.srcObject = null
   remoteClientId = null
+  shouldInitiateOffer = false
+  isMakingOffer = false
+  pendingCandidates.length = 0
   startButton.disabled = !isConnectedToSignalingServer
   endButton.disabled = true
 

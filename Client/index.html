@@ -518,7 +518,7 @@
         </div>
 
         <div class="sidebar">
-            
+
 
             <div class="panel">
                 <h3>
@@ -574,8 +574,14 @@
                     <p>To connect from other devices on your network:</p>
                     <br>
                     <p>1. <strong>Find your server IP:</strong> Check the server console for network URLs</p>
-                    <p>2. <strong>Connect from other devices:</strong> Use <code>http://[server-ip]:3000</code></p>
+                    <p>2. <strong>Connect from other devices:</strong> Use <code>http://[server-ip]:8080</code> (the
+                        server serves everything on one port — there's no separate port 3000)</p>
                     <p>3. <strong>Allow permissions:</strong> Grant camera/microphone access when prompted</p>
+                    <br>
+                    <p><strong>⚠️ HTTPS required for calls:</strong> Browsers only allow camera/microphone access on
+                        HTTPS pages or on <code>localhost</code>. A plain <code>http://[server-ip]:8080</code> URL will
+                        let you see peers, but calling will fail. Serve this app over HTTPS (self-signed cert, reverse
+                        proxy, or a tunnel like ngrok) for real cross-device calls.</p>
                     <br>
                     <p><strong>Current URL:</strong> <code id="current-url"></code></p>
                 </div>
