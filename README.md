@@ -30,8 +30,8 @@ A simple peer-to-peer video calling application using WebRTC and WebSockets for 
 
 ### Option 1: Direct Backend Access (Recommended)
 - Start the backend server on port 8080
-- Access directly via: `http://localhost:8080`
-- For other devices: `http://[your-server-ip]:8080`
+- Access directly via: `https://localhost:8080`
+- For other devices: `https://[your-server-ip]:8080`
 
 ### Option 2: Separate Frontend Development Server
 - Start backend server on port 8080
@@ -41,7 +41,7 @@ A simple peer-to-peer video calling application using WebRTC and WebSockets for 
 ### Access from Other Devices
 - Make sure all devices are on the same network
 - Find your server's IP address (displayed in the console when starting the server)
-- On other devices, open a browser and navigate to: `http://[your-server-ip]:8080`
+- On other devices, open a browser and navigate to: `https://[your-server-ip]:8080`
 
 ## Network Requirements
 
